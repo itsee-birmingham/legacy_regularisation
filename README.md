@@ -8,3 +8,4 @@ To include this in collation_editor_core first clone the collation_editor_core c
 
 ``` git submodule add https://github.com/itsee-birmingham/legacy_regularisation.git legacy_regularisation ```
 
+There are multiple ways that this code could be used in your installation. The way I have chosed to do this is to host two different collation urls: one for the latest regularisation and one for the legacy regularisation. In the Django services file in the doCollate I check the name of the project at CL.project.name and if it is in my list of legacy projects it gets sent to the legacy url and otherwise it gets sent to the normal url. 
