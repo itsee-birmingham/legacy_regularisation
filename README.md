@@ -1,5 +1,8 @@
 # legacy_regularisation
-Legacy support for collation projects started before October 2020
+
+The code in this repository provides legacy support for projects generated using versions of collation_editor_core prior to release 1.1.0. In that release the way that regularisation rules were changed significantly. 
 
 
-git submodule add https://github.com/itsee-birmingham/legacy_regularisation.git legacy_regularisation
+To include this in collation_editor_core first clone the collation_editor_core code. The inside that directory add this repository as a submodule as follows:
+
+``` git submodule add https://github.com/itsee-birmingham/legacy_regularisation.git legacy_regularisation ```
