@@ -4,9 +4,9 @@ import importlib
 import json
 import warnings
 from collation.core.exceptions import DataInputException
-from collation.core.legacy_regularisation.postprocessor_preOct20 import PostProcessor
+from collation.legacy_regularisation.postprocessor_preOct20 import PostProcessor
 import urllib.request
-from collation.core.legacy_regularisation.regulariser_preOct20 import Regulariser
+from collation.legacy_regularisation.regulariser_preOct20 import Regulariser
 
 
 class PreProcessor(Regulariser):

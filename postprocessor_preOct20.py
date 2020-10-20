@@ -9,7 +9,7 @@ import decimal
 import re
 import sys
 import importlib
-from collation.core.legacy_regularisation.regulariser_preOct20 import Regulariser
+from collation.legacy_regularisation.regulariser_preOct20 import Regulariser
 
 
 class PostProcessor(Regulariser):
