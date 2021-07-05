@@ -11,26 +11,76 @@ from collation.legacy_regularisation.regulariser_preOct20 import Regulariser
 
 class PreProcessor(Regulariser):
 
-    # last arg just to be compatible with dev branch
-    def __init__(self, display_settings_config=None, local_python_functions=None,
-                 rule_conditions_config=None, split_single_reading_units=False):
+    def __init__(self, configs):
 
-        self.display_settings_config = display_settings_config
-        self.local_python_functions = local_python_functions
-        self.rule_conds_config = rule_conditions_config
-        self.split_single_reading_units = split_single_reading_units
-        Regulariser.__init__(self, rule_conditions_config, local_python_functions)
+        # if not present these are set to the previous default values to maintain consistency
+        if 'display_settings_config' in configs:
+            self.display_settings_config = configs['display_settings_config']
+        else:
+            self.display_settings_config = None
 
-    def process_witness_list(self, data_input, requested_witnesses, rules, basetext_transcription,
-                             project, settings, collation_settings, accept):
-        self.settings = settings
+        if 'local_python_functions' in configs:
+            self.local_python_functions = configs['local_python_functions']
+        else:
+            self.local_python_functions = None
+
+        if 'rule_conditions_config' in configs:
+            self.rule_conds_config = configs['rule_conditions_config']
+        else:
+            self.rule_conds_config = None
+
+        if 'algorithm_settings' in configs:
+            algorithm_settings = {}
+            algorithm_settings['algorithm'] = configs['algorithm_settings']['algorithm']
+            algorithm_settings['tokenComparator'] = {}
+            if 'fuzzy_match' in configs['algorithm_settings']:
+                algorithm_settings['tokenComparator']['type'] = 'levenshtein'
+                if 'distance' in configs['algorithm_settings']:
+                    algorithm_settings['tokenComparator']['distance'] = configs['algorithm_settings']['distance']
+                else:
+                    # default to 2
+                    algorithm_settings['tokenComparator']['distance'] = 2
+            else:
+                algorithm_settings['tokenComparator']['type'] = 'equality'
+            self.algorithm_settings = algorithm_settings
+        else:
+            self.algorithm_settings = None
+
+        if 'debug' in configs:
+            self.debug = configs['debug']
+        else:
+            self.debug = False
+
+        if 'collatexHost' in configs:
+            self.host = configs['collatexHost']
+        else:
+            self.host = 'http://localhost:7369/collate'
+
+        if 'split_single_reading_units' in configs:
+            self.split_single_reading_units = configs['split_single_reading_units']
+        else:
+            self.split_single_reading_units = False
+
+        Regulariser.__init__(self, self.rule_conds_config, self.local_python_functions)
+
+    def process_witness_list(self, collation_input_data, accept='lcs'):
+        self.display_settings = collation_input_data['display_settings']
+        data_input = collation_input_data['unit_data']
         data = data_input['data']
+        rules = collation_input_data['rules']
+        basetext_transcription = collation_input_data['data_settings']['base_text']
+
         witnesses = {}
         collatable_witnesses = []
         om_witnesses = []
         lac_hands = []
-        lac_witnesses = requested_witnesses  # assume everything is lac until we find it
+        # assume everything is lac until we find out it isn't
+        lac_witnesses = collation_input_data['data_settings']['witness_list']
         hand_to_transcript_map = {}
+        if 'special_categories' in data_input:
+            special_categories = data_input['special_categories']
+        else:
+            special_categories = []
         verse = None
         basetext_siglum = None
         # TODO: remove deprecation warning when ready
@@ -39,12 +89,11 @@ class PreProcessor(Regulariser):
         # this means we don't have to use the numerical pk
         # it must match with whatever is used in the services 'get_siglum_map' code
         if 'transcription_id' in data[0]:
-            warnings.warn("The use of 'transcription_id' as a key in 'verse' object is "
-                          "deprecated in favour of 'transcription'. "
-                          "Support will be removed in future releases.", PendingDeprecationWarning)
+            warnings.warn('''The use of 'transcription_id' as a key in the collation unit object is deprecated
+                          in favour of 'transcription'. Support will be removed in future releases''',
+                          PendingDeprecationWarning)
         # Add all the witness texts and keep record of witnesses omitting the verse and lacunose witnesses
         for transcription_verse in data:
-
             # TODO: remove legacy support when ready
             if 'transcription_id' in transcription_verse:
                 transcription_verse['transcription'] = transcription_verse['transcription_id']
@@ -93,6 +142,7 @@ class PreProcessor(Regulariser):
                     if len(reading['tokens']) == 0:
                         if 'gap_reading' in reading:
                             lac_hands.append(reading['id'])
+                            self.add_to_special_categories(special_categories, reading)
                             trans_verse[i] = None
                         else:
                             om_witnesses.append(reading['id'])
@@ -106,8 +156,7 @@ class PreProcessor(Regulariser):
                     hand_to_transcript_map[transcription_verse['siglum']] = \
                         transcription_verse['transcription_identifier']
                 else:
-                    hand_to_transcript_map[transcription_verse['siglum']] = \
-                        transcription_verse['transcription']
+                    hand_to_transcript_map[transcription_verse['siglum']] = transcription_verse['transcription']
             else:
                 collatable_witnesses.extend(trans_verse)
 
@@ -115,6 +164,7 @@ class PreProcessor(Regulariser):
         witnesses['lac'] = list(data_input['lac_witnesses'].keys())
         witnesses['lac'].extend(lac_hands)
         witnesses['om'] = om_witnesses
+        witnesses['special_categories'] = special_categories
 
         # can this all be better so one thing does both WCE and NTVMR??
         # now add in lac witnesses to the mapping
@@ -137,9 +187,22 @@ class PreProcessor(Regulariser):
                      'missing_reason': missing_reason,
                      'index': 1
                      }
-        return self.regularise(rules, witnesses, verse, settings, collation_settings, project, accept)
+        return self.regularise(rules, witnesses, verse, accept)
 
-    def regularise(self, decisions, witnesses, verse, settings, collation_settings, project, accept):
+    def add_to_special_categories(self, special_categories, reading):
+        added = False
+        for entry in special_categories:
+            if entry['label'] == reading['gap_reading']:
+                entry['witnesses'].append(reading['id'])
+                added = True
+        if not added:
+            special_categories.append({'label': reading['gap_reading'],
+                                       'witnesses': [reading['id']],
+                                       'type': 'lac'})
+        return special_categories
+
+    # def regularise(self, decisions, witnesses, verse, settings, collation_settings, project, accept):
+    def regularise(self, decisions, witnesses, verse, accept):
         """Regularise the witness."""
         print('There are {} decisions'.format(len(decisions)), file=sys.stderr)
         for witness in witnesses['collatable']:
@@ -156,20 +219,20 @@ class PreProcessor(Regulariser):
                             token['decision_details'].extend(details)
                         except KeyError:
                             token['decision_details'] = details
-        return self.get_collation(witnesses, verse, decisions, settings, collation_settings, project, accept)
+        return self.get_collation(witnesses, verse, decisions, accept)
 
-    def get_collation(self, witnesses, verse, decisions, settings, collation_settings, project, accept):
+    def get_collation(self, witnesses, verse, decisions, accept):
         """
         Get the collation for the context.
         """
-        algorithm = 'auto'
+        algorithm = 'dekker'
         tokenComparator = {}
-        if collation_settings['algorithm']:
-            algorithm = collation_settings['algorithm']
-        if collation_settings['tokenComparator'] and collation_settings['tokenComparator']['type']:
+        if self.algorithm_settings['algorithm']:
+            algorithm = self.algorithm_settings['algorithm']
+        if self.algorithm_settings['tokenComparator'] and self.algorithm_settings['tokenComparator']['type']:
             tokenComparator['type'] = 'levenshtein'
-            if collation_settings['tokenComparator'] and collation_settings['tokenComparator']['distance']:
-                tokenComparator['distance'] = collation_settings['tokenComparator']['distance']
+            if self.algorithm_settings['tokenComparator'] and self.algorithm_settings['tokenComparator']['distance']:
+                tokenComparator['distance'] = self.algorithm_settings['tokenComparator']['distance']
             else:
                 # default to 2
                 tokenComparator['distance'] = 2
@@ -188,25 +251,8 @@ class PreProcessor(Regulariser):
             options = {'outputFormat': accept,
                        'algorithm': algorithm,
                        'tokenComparator': tokenComparator,
-                       'collatexHost': collation_settings['host']
                        }
             collatex_response = self.do_collate(witness_list, options)
-
-            # these options are not currently used but could be useful later
-            # they deal with outputs from collate that are not the collation editor display
-            # # Start with raw XML types
-            # if accept == 'xml' or accept == 'graphml' or accept == 'tei':
-            #     self.set_header("Content-Type", "application/xml; charset=UTF-8")
-            #     self.write(collatex_response)
-            #     self.finish()
-            #     return
-            #
-            # # Next is raw JSON
-            # elif accept == 'json':
-            #     self.set_header("Content-Type", "application/json; charset=UTF-8")
-            #     self.write(collatex_response)
-            #     self.finish()
-            #     return
 
             try:
                 alignment_table = json.loads(collatex_response.decode('utf-8'))
@@ -216,12 +262,17 @@ class PreProcessor(Regulariser):
             # get overtext details
             overtext_details = self.get_overtext(verse)
             print('collation done', file=sys.stderr)
-            return self.do_post_processing(alignment_table, decisions, overtext_details[0],
-                                           overtext_details[1], witnesses['om'], witnesses['lac'],
-                                           witnesses['hand_id_map'], settings)
+            return self.do_post_processing(alignment_table,
+                                           decisions,
+                                           overtext_details[0],
+                                           overtext_details[1],
+                                           witnesses['om'],
+                                           witnesses['lac'],
+                                           witnesses['hand_id_map'],
+                                           witnesses['special_categories'])
 
-    def do_post_processing(self, alignment_table, decisions, overtext_name, overtext,
-                           om_readings, lac_readings, hand_id_map, settings):
+    def do_post_processing(self, alignment_table, decisions, overtext_name, overtext, om_readings,
+                           lac_readings, hand_id_map, special_categories):
 
         pp = PostProcessor(
             alignment_table=alignment_table,
@@ -230,7 +281,8 @@ class PreProcessor(Regulariser):
             om_readings=om_readings,
             lac_readings=lac_readings,
             hand_id_map=hand_id_map,
-            settings=settings,
+            special_categories=special_categories,
+            display_settings=self.display_settings,
             decisions=decisions,
             display_settings_config=self.display_settings_config,
             local_python_functions=self.local_python_functions,
@@ -275,6 +327,15 @@ class PreProcessor(Regulariser):
             print('tokenComparator - {}'.format(options['tokenComparator']), file=sys.stderr)
         except KeyError:
             pass
+        if self.debug is True:
+            problem_wits = []
+            for wit in data['witnesses']:
+                for token in wit['tokens']:
+                    if token['t'] == '':
+                        problem_wits.append(wit['id'])
+            if len(problem_wits) > 0:
+                raise DataInputException('There is a problem with an empty token in the following '
+                                         'witness(es): {}'.format(', '.join(problem_wits)))
 
         if (self.local_python_functions
                 and 'local_collation_function' in self.local_python_functions):
@@ -294,10 +355,7 @@ class PreProcessor(Regulariser):
                 # examples include {"type": "levenshtein", "distance": 2}#{'type': 'equality'}
                 data['tokenComparator'] = options['tokenComparator']
 
-            if 'collatexHost' in options:
-                target = 'http://{}/collate'.format(options['collatexHost'])
-            else:
-                target = 'http://localhost:7369//collate'
+            target = self.host
 
             json_witnesses = json.dumps(data)
             if 'outputFormat' in options:
@@ -308,8 +366,8 @@ class PreProcessor(Regulariser):
             req = urllib.request.Request(target)
             req.add_header('content-type', 'application/json')
             req.add_header('Accept', accept_header)
-            response = urllib.request.urlopen(req, json_witnesses.encode('utf-8'))
 
+            response = urllib.request.urlopen(req, json_witnesses.encode('utf-8'))
             return response.read()
 
     def convert_header_argument(self, accept):
