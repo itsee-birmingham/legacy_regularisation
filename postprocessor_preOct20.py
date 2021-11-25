@@ -10,9 +10,10 @@ import re
 import sys
 import importlib
 from collation.legacy_regularisation.regulariser_preOct20 import Regulariser
+from collation.core.settings_applier import SettingsApplier
 
 
-class PostProcessor(Regulariser):
+class PostProcessor(Regulariser, SettingsApplier):
     """Convert alignment table into variant units."""
 
     def __init__(self,
@@ -22,7 +23,8 @@ class PostProcessor(Regulariser):
                  om_readings,
                  lac_readings,
                  hand_id_map,
-                 settings,
+                 special_categories,
+                 display_settings,
                  decisions,
                  display_settings_config,
                  local_python_functions,
@@ -35,8 +37,9 @@ class PostProcessor(Regulariser):
         self.overtext = overtext
         self.om_readings = om_readings
         self.lac_readings = lac_readings
+        self.special_categories = special_categories
         self.hand_id_map = hand_id_map
-        self.settings = settings
+        self.display_settings = display_settings
         self.decisions = decisions
         self.display_settings_config = display_settings_config
         self.display_settings_config['configs'].sort(key=lambda k: k['execution_pos'])
@@ -46,10 +49,8 @@ class PostProcessor(Regulariser):
             self.local_python_functions = None
         self.split_single_reading_units = split_single_reading_units
         Regulariser.__init__(self, rule_conditions_config, local_python_functions)
-        module_name = self.display_settings_config['python_file']
-        class_name = self.display_settings_config['class_name']
-        MyClass = getattr(importlib.import_module(module_name), class_name)
-        self.apply_settings_instance = MyClass()
+        SettingsApplier.__init__(self, {'display_settings': self.display_settings,
+                                        'display_settings_config': self.display_settings_config})
 
     ###########################################################
     # this is the starting function
@@ -104,6 +105,10 @@ class PostProcessor(Regulariser):
             for i, witness in enumerate(unit):
                 witness = self.process_witness_tokens(witness)
                 reading = ' '.join([self.get_token_text(token) for token in witness])
+                # empty string not a valid key in python dict so change to underscore
+                # this is only used internally in this class and does not get passed out to js
+                if reading == '':
+                    reading = '_'
 
                 if reading in readings.keys():
                     readings[reading]['witnesses'].append(self.alignment_table['witnesses'][i])
@@ -123,6 +128,7 @@ class PostProcessor(Regulariser):
                     else:
                         variant_unit.append(unit[key])
                 reading_sets.append(variant_unit)
+
         # next line was an experiment to try chunking myself.
         # reading_sets = self.check_adjacent_shared_units(reading_sets)
         return reading_sets
@@ -222,12 +228,12 @@ class PostProcessor(Regulariser):
         token_matches = []
         base_text = None
         # if we have at least two actual readings (not including empty readings)
-        if len(readings.keys()) > 1 and ('' not in readings.keys()) or \
-           len(readings.keys()) > 2 and ('' in readings.keys()):
+        if ((len(readings.keys()) > 1 and ('_' not in readings.keys())) or
+                (len(readings.keys()) > 2 and ('_' in readings.keys()))):
             matrix = []  # a token matrix one row per reading one column per token
             readings_list = []  # the full reading data in same order as matrix
             for reading in readings.keys():
-                if len(reading.split()) > 0:
+                if len(reading.split()) > 0 and reading != '_':
                     matrix.append(reading.split())
                 else:
                     matrix.append(None)
@@ -240,7 +246,7 @@ class PostProcessor(Regulariser):
                 if row is not None:
                     highest = max(len(row), highest)
                     # I don't know what is expected here - it used to test for 'None'. It might not be needed at all
-                    if row[0] != '' and row[0] is not None:
+                    if row[0] != '_' and row[0] is not None:
                         lowest = min(len(row), lowest)
             if highest > 1:  # if at least one reading has more than one word
                 lengths = []
@@ -264,7 +270,7 @@ class PostProcessor(Regulariser):
             # so just return existing readings except when the setting tells us to
             # In particular this is always True when we are combining new witnesses
             # into existing collations when we always want the new reading in smallest chunks possible
-            if (len([x for x in readings.keys() if x != '']) == 1
+            if (len([x for x in readings.keys()]) == 1
                     and self.split_single_reading_units is True):
                 for key in readings:
                     if len(key.split(' ')) == len(readings[key]['text']):
@@ -413,8 +419,8 @@ class PostProcessor(Regulariser):
             return '{}'.format(start)
 
         for reading in unit:
-            # TODO: do we need to do this if there is only one word? also could we throw multi-word ones back to collate
-            # and let it do better aligning?
+            # TODO: do we need to do this if there is only one word? also could we throw multi-word ones back to
+            # collate and let it do better aligning?
             i = sub_index_start
             for token in reading['text']:
                 token['index'] = '{}.{}'.format(start, i)
@@ -428,25 +434,8 @@ class PostProcessor(Regulariser):
                 'apparatus': anchored_readings,
                 'om_readings': self.om_readings,
                 'lac_readings': self.lac_readings,
+                'special_categories': self.special_categories,
                 'hand_id_map': self.hand_id_map}
-
-    def apply_settings(self, token):
-        # set up a base string for interface (this may change later with the settings)
-        if 'n' in token:
-            token['interface'] = token['n']
-        elif 'original' in token:
-            token['interface'] = token['original']
-        else:
-            token['interface'] = token['t']
-
-        # display_settings_config is already in execution order
-        for setting in self.display_settings_config['configs']:
-            if setting['id'] in self.settings and setting['apply_when'] is True \
-                    or setting['id'] not in self.settings and setting['apply_when'] is False:
-
-                token = getattr(self.apply_settings_instance, setting['function'])(token)
-        token['interface'] = token['interface'].replace('<', '&lt;').replace('>', '&gt;')
-        return token
 
     def process_witness_tokens(self, witness):
         if not isinstance(witness, list):

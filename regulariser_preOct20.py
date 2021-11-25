@@ -78,7 +78,8 @@ class Regulariser(object):
         # TODO: perhaps always better to do created time otherwise adding exception
         # to a global rule will change the order for all verses
         if len(decision_matches) > 1:
-            decision_matches.sort(key=lambda x: x['_meta']['_last_modified_time'] if '_meta' in x else x['created_time'])
+            decision_matches.sort(key=lambda x: x['_meta']['_last_modified_time']
+                                  if '_meta' in x else x['created_time'])
 
         classes = []
         last_match = None
@@ -105,7 +106,7 @@ class Regulariser(object):
         if self.local_python_functions and 'prepare_t' in self.local_python_functions:
             return getattr(self.prepare_t_instance,
                            self.local_python_functions['prepare_t']['function']
-                           )(data, self.settings, self.display_settings_config)
+                           )(data, self.display_settings, self.display_settings_config)
         else:
             # default is not to touch the input
             return data
