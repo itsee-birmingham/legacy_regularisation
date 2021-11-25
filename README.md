@@ -5,6 +5,7 @@ The code in this repository provides legacy support for projects generated using
 # Referencing
 
 To cite the collation editor core code please use the doi:
+
 [![DOI](https://zenodo.org/badge/303814336.svg)](https://zenodo.org/badge/latestdoi/303814336)
 
 # To provide this legacy support
