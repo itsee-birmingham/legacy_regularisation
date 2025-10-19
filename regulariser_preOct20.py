@@ -1,9 +1,16 @@
 # -*- coding: utf-8 -*-
-import sys
 import importlib
+import sys
 
 
 class Regulariser(object):
+    """Apply regularisation rules.
+
+    Attributes:
+        rule_conditions_config (dict): The dictionary for the rule conditions configuration.
+        local_python_functions (dict): Additional python functions for this installation.
+
+    """
 
     def __init__(self, rule_conditions_config, local_python_functions):
         self.rule_conditions_config = rule_conditions_config
@@ -22,6 +29,7 @@ class Regulariser(object):
             self.local_python_functions = None
 
     def match_tokens(self, token, decision, stage):
+        """Check the decision still matches after any rule conditions have been applied."""
         if '_id' in decision:
             print('deprecated - use \'id\' for rules not \'_id\'', file=sys.stderr)
             decision['id'] = decision['_id']
@@ -29,14 +37,20 @@ class Regulariser(object):
         token_matches = token['rule_match']
         for condition in self.rule_conditions_config['configs']:
             if 'conditions' in decision and decision['conditions'] is not None:
-                if (condition['id'] in decision['conditions'].keys()
-                        and decision['conditions'][condition['id']] is True
-                        and condition['apply_when'] is True) \
-                        or \
-                        ((condition['id'] not in decision['conditions'].keys()
-                         or (condition['id'] in decision['conditions'].keys()
-                         and decision['conditions'][condition['id']] is False))
-                         and condition['apply_when'] is False):
+                if (
+                    condition['id'] in decision['conditions'].keys()
+                    and decision['conditions'][condition['id']] is True
+                    and condition['apply_when'] is True
+                ) or (
+                    (
+                        condition['id'] not in decision['conditions'].keys()
+                        or (
+                            condition['id'] in decision['conditions'].keys()
+                            and decision['conditions'][condition['id']] is False
+                        )
+                    )
+                    and condition['apply_when'] is False
+                ):
                     if condition['type'] == 'boolean':
                         result = getattr(self.instance, condition['function'])(token, decision)
                         if result is False:
@@ -44,8 +58,9 @@ class Regulariser(object):
                             # irrelevant so we can return false already
                             return (False, None, None, None, None, None, None)
                     if condition['type'] == 'string_application':
-                        decision_word, token_matches = getattr(self.instance, condition['function'])(decision_word,
-                                                                                                     token_matches)
+                        decision_word, token_matches = getattr(self.instance, condition['function'])(
+                            decision_word, token_matches
+                        )
         for word in token_matches:
             if word == decision_word:
                 if stage == 'post-collate' and 'n' in token.keys():
@@ -55,7 +70,20 @@ class Regulariser(object):
         return (False, None, None, None, None, None, None)
 
     def regularise_token(self, token, decisions, stage):
-        """Check the token against the rules."""
+        """Check the token against the rules.
+
+        Args:
+            token (dict): The token to be regualised.
+            decisions (list): The relevant rules for this collation unit retrieved from the database. Each rule in the
+                list is a dictionary.
+            stage (str): The stage that the regularisation is being made, either 'pre-collate' or 'post-collate'
+
+        Returns:
+            tuple (boolean, string|None, list|None): Details of any matching rules in application order. The boolean
+                says whether at least one rule matched the token. The string is the n value of the last rule in the
+                chain. The list gives simplified details of all rules that were applied.
+
+        """
         decision_matches = []
         for decision in decisions:
             if '_id' in decision:
@@ -63,23 +91,29 @@ class Regulariser(object):
                 decision['id'] = decision['_id']
 
             # we are not recording subtypes anymore so we need to check here t against n
-            if (self.prepare_t(decision['t']) != decision['n'] and stage == 'pre-collate') \
-                    or (self.prepare_t(decision['t']) == decision['n'] and stage == 'post-collate'):
-
-                if decision['scope'] == u'always' \
-                    or decision['scope'] == u'verse' \
-                    or (decision['scope'] == u'manuscript'
-                        and token['reading'] == decision['context']['witness']) \
-                    or (decision['scope'] == u'once'
-                        and (token['index'] == str(decision['context']['word'])
-                        and token['reading'] == decision['context']['witness'])):
+            if (self.prepare_t(decision['t']) != decision['n'] and stage == 'pre-collate') or (
+                self.prepare_t(decision['t']) == decision['n'] and stage == 'post-collate'
+            ):
+                if (
+                    decision['scope'] == 'always'
+                    or decision['scope'] == 'verse'
+                    or (decision['scope'] == 'manuscript' and token['reading'] == decision['context']['witness'])
+                    or (
+                        decision['scope'] == 'once'
+                        and (
+                            token['index'] == str(decision['context']['word'])
+                            and token['reading'] == decision['context']['witness']
+                        )
+                    )
+                ):
                     decision_matches.append(decision)
         # order by time last modified or created for newer data
         # TODO: perhaps always better to do created time otherwise adding exception
         # to a global rule will change the order for all verses
         if len(decision_matches) > 1:
-            decision_matches.sort(key=lambda x: x['_meta']['_last_modified_time']
-                                  if '_meta' in x else x['created_time'])
+            decision_matches.sort(
+                key=lambda x: x['_meta']['_last_modified_time'] if '_meta' in x else x['created_time']
+            )
 
         classes = []
         last_match = None
@@ -101,12 +135,14 @@ class Regulariser(object):
         return (False, None, None)
 
     def prepare_t(self, data):
-        """the result of this determines if a rule is to be applied pre- or post-collate
-        It should match whatever you do to the tokens to prepare them for collation"""
+        """The result of this determines if a rule is to be applied pre- or post-collate.
+
+        It should match whatever you do to the tokens to prepare them for collation.
+        """
         if self.local_python_functions and 'prepare_t' in self.local_python_functions:
-            return getattr(self.prepare_t_instance,
-                           self.local_python_functions['prepare_t']['function']
-                           )(data, self.display_settings, self.display_settings_config)
+            return getattr(self.prepare_t_instance, self.local_python_functions['prepare_t']['function'])(
+                data, self.display_settings, self.display_settings_config
+            )
         else:
             # default is not to touch the input
             return data
